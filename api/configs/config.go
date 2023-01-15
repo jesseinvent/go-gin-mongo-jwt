@@ -16,7 +16,7 @@ type Configs struct {
 func Load() Configs {
 
 	viper.AddConfigPath(".");
-	viper.SetConfigName(".env");
+	viper.SetConfigName("../.env");
 	viper.SetConfigType("env");
 
 	viper.AutomaticEnv();
@@ -30,7 +30,6 @@ func Load() Configs {
 	var configs Configs;
 
 	viper.Unmarshal(&configs);
-
 
 	return configs;
 }
