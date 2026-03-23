@@ -19,58 +19,48 @@ import (
 
 var validate = validator.New();
 
-func hashPassword(password string) string {
+func hashPassword(password string) (string, error) {
 
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 15);
-
 	if err != nil {
-		log.Panic(err);
+		return "", err
 	}
 
-	return string(bytes);
+	return string(bytes), nil
 }
 
 func verifyPassword(userPassword string, providedPassword string) bool {
 
-	isValid := true;
-
 	err := bcrypt.CompareHashAndPassword([]byte(providedPassword), []byte(userPassword));
 
-	if err != nil {
-		fmt.Println(err);
-		isValid = false;
-	}
-
-	return isValid;
+	//return nil if passwords are thesame
+	return err == nil;
 }
 
 func Signup(c *gin.Context) {
 
-	fmt.Println("Signing up");
+	fmt.Println("Signing up")
 
-	var ctx, cancel = context.WithTimeout(context.Background(), 100 * time.Second);
+	ctx, cancel := context.WithTimeout(context.Background(), 100 * time.Second)
+	defer cancel()
 
-	var user models.User;
+	var user models.User
 
 
 	// Binds json payload to model `json` tag
-	err := c.BindJSON(&user); 
-	
-	if err != nil {
+	if err := c.BindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid or empty fields supplied.",
 		});
-		return;
+		return
 	}
 
-	defer cancel();
+	
 
 	// Validate user inputs with model
-	validationErr := validate.Struct(user);
-
-	if validationErr != nil {
+	if validationErr := validate.Struct(user); validationErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()});
-		return;
+		return
 	}
 
 	// Check for existing email and phone number in database
@@ -81,7 +71,7 @@ func Signup(c *gin.Context) {
 
 	if existingUser.Email != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email or phone number already exists"});
-		return;
+		return
 	}
 
 	user.Created_at = time.Now();
@@ -90,57 +80,60 @@ func Signup(c *gin.Context) {
 	user.ID = primitive.NewObjectID();
 
 	token, refreshToken, err := helpers.GenerateAllTokens(&user);
-
 	if err != nil {
-		log.Fatal(err);
+		fmt.Println(err.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "an error occcured please try again"});
+		return
 	}
 
-	user.Token = token;
-	user.Refresh_token = refreshToken;
+	user.Token = token
+	user.Refresh_token = refreshToken
 
-	password := hashPassword(user.Password);
-
-	user.Password = password;
+	password, err := hashPassword(user.Password)
+	if err != nil {
+		fmt.Println(err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid password format"});
+		return
+	}
+	
+	user.Password = password
 
 	result, err := models.UserCollection.InsertOne(ctx, user);
-
 	if err != nil {
-		fmt.Print(err);
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user was not created"});
-		return;
+		fmt.Println(err.Error())
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "user was not created"});
+		return
 	}
 
-	defer cancel();
 
 	c.JSON(http.StatusOK, result);
-
 }
 
 func Login(c *gin.Context) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100 * time.Second);
+	fmt.Println("Login")
 
-	var user models.User;
+	ctx, cancel := context.WithTimeout(context.Background(), 100 * time.Second)
+	defer cancel()
 
-	var foundUser models.User;
+	var user, foundUser models.User
 
 	if err := c.BindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()});
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	_ = models.UserCollection.FindOne(ctx, bson.M{"email": user.Email}).Decode(&foundUser);
 
 	if foundUser.Email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "user not found"});
+		return
 	}
 
-	defer cancel();
 
-	passwordIsValid := verifyPassword(user.Password, foundUser.Password);
-
-	if !passwordIsValid {
+	if passwordIsValid := verifyPassword(user.Password, foundUser.Password); !passwordIsValid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "password incorrect"});
-		return;
+		return
 	}
 
 	// token, refreshToken, _ := helpers.GenerateAllTokens(&foundUser);	
